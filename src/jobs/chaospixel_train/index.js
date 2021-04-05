@@ -29,8 +29,8 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             validationSplit: 0.15,
             batchSize: 128,
             fineTuningEpochs: 100,
-            initialTransferEpochs: 100,
-            canvasSize: 320,
+            initialTransferEpochs: 250,
+            canvasSize: 224,
             topLayerGroupNames: [/*'conv_pw_9', 'conv_pw_10',*/ 'conv_pw_11'],
             gpu: false
         }
@@ -44,8 +44,68 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         this._jobMeta.labelMultiplier = [this.jobMeta.canvasSize, 1, 1, 1, 1];
 
     }
+    async loadAndShapeImage(imgSrc) {
+        /*return new Promise((resolve, reject)=>{
+
+            let imageEle = new Image();
+            imageEle.onload = ()=>{
+                return resolve(imageEle);
+            }
+            imageEle.src = imgSrc;
+        });*/
+        return new Promise((resolve, reject)=>{
+            const fakeCanvas = canvas.createCanvas(this.jobMeta.canvasSize, this.jobMeta.canvasSize)
+            //document.body.appendChild(fakeCanvas);
+            const fakeCtx = fakeCanvas.getContext('2d');
+
+            let imageEle = new canvas.Image();
+            imageEle.style = `image-rendering: auto;
+                image-rendering: crisp-edges;
+                image-rendering: pixelated;`;
+            imageEle.onload = ()=>{
+                let scale = this.jobMeta.canvasSize / imageEle.width;
+                /*if(imageEle.height < imageEle.width){
+                    scale = this.options.canvasHeight / imageEle.height;
+                }*/
+                let width = imageEle.width * scale;
+                let height = imageEle.height * scale;
+                fakeCanvas.width = this.jobMeta.canvasSize;// width;
+                fakeCanvas.height = this.jobMeta.canvasSize;//height;
+                fakeCtx.scale(scale, scale);
+                fakeCtx.mozImageSmoothingEnabled = false;
+                fakeCtx.webkitImageSmoothingEnabled = false;
+                fakeCtx.imageSmoothingEnabled = false;
+                fakeCtx.msImageSmoothingEnabled = false;
+                fakeCtx.oImageSmoothingEnabled = false;
+                console.log("fakeCtx.imageSmoothingEnabled: ", fakeCtx.imageSmoothingEnabled);
+                fakeCtx.fillStyle = 'green';
+                fakeCtx.fillRect(0, 0, this.jobMeta.canvasSize, this.jobMeta.canvasSize);
+                fakeCtx.drawImage(imageEle,0,0,   imageEle.width, imageEle.height); //width, height); //this.options.canvasWidth, this.options.canvasHeight);//
+                fakeCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+
+
+                //imageEle.width = width;// this.options.canvasWidth;
+                //imageEle.height = height;// this.options.canvasHeight;
+
+                let newImageEle = new canvas.Image();
+                newImageEle.style = `image-rendering: auto;
+                image-rendering: crisp-edges;
+                image-rendering: pixelated;`;
+                newImageEle.onload = ()=>{
+
+                    //document.body.removeChild(fakeCanvas);
+                    return resolve(newImageEle);
+                }
+                newImageEle.src = fakeCanvas.toDataURL('image/bmp',1);
+
+
+            }
+            imageEle.src = imgSrc;
+        });
+    }
     async run(){
-        const trainingData = await this.downloadFile(this.jobMeta.data_uri);
+        const trainingData = await this.downloadFile(this.jobMeta.data_uri);// JSON.parse(fs.readFileSync('C:\\Users\\mlea\\WebstormProjects\\chaos-worker\\224.json').toString())//
         let tagsDict = {};
         let imageEleDict = {};
         let p = Promise.resolve();
@@ -56,8 +116,8 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             p = p.then(()=>{
                 return canvas.loadImage(image.imgSrc)
             })
-            .then((imageEle)=>{
-                imageEleDict[image.id] = imageEle;
+            .then(async  (imageEle)=>{
+                imageEleDict[image.id] = await this.loadAndShapeImage(imageEle.src);
             });
             image.boxes.forEach((box)=>{
                 box.tags.forEach((tag)=>{
@@ -85,7 +145,7 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             tfn = require('@tensorflow/tfjs-node');
         }
 
-        const modelSaveURL = 'file://./tmp/' + this.job._id + '-x626';
+        const modelSaveURL = 'file://./tmp/' + this.job._id + '-v2.2';
 
         const tBegin = tf.util.now();
 
@@ -121,29 +181,35 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             metrics: ['accuracy']
         });
         model.summary();
+        let callbacks = {
+            onEpochEnd: (epoch, logs) => {
+                this.log(
+                    `Accuracy: ${(logs.acc * 100).toFixed(1)}% Epoch: ${epoch + 1}`);
+                this.updateStatus({
+                    phase: 'initial',
+                    acc: logs.acc,
+                    epoch: epoch
+                })
 
+            },
+            onTrainEnd: async (logs) => {
+                this.updateStatus({
+                    phase: 'initial',
+                    state: 'done'
+                })
+            }
+        }
+        /*let logDir = 'C:\\Users\\mlea\\WebstormProjects\\chaos-worker\\tmp\\logs';//__dirname + '/tmp/logs';
+        callbacks = tfn.node.tensorBoard(logDir, {
+            updateFreq: 'epoch'
+        })*/
         // Initial phase of transfer learning.
         console.log('Phase 1 of 2: initial transfer learning');
         await model.fit(images, targets, {
             epochs: this.jobMeta.initialTransferEpochs,
             batchSize: this.jobMeta.batchSize,
             validationSplit: this.jobMeta.validationSplit,
-            callbacks: {
-                onEpochEnd: (epoch, logs) => {
-                    this.log(
-                        `Accuracy: ${(logs.acc * 100).toFixed(1)}% Epoch: ${epoch + 1}`);
-
-                },
-                onTrainEnd: async (logs) => {
-
-                    //const saveResult = await model.save('localstorage://my-model-1');
-                    //await model.save('downloads://my-model'); Downloads the file
-                    //https://www.tensorflow.org/js/guide/save_load
-                    //await model.save('http://model-server.domain/upload')
-                    //NodeJS: await model.save('file:///path/to/my-model');
-                    this.log("Train End: " + JSON.stringify(logs, null, 3));
-                }
-            }
+            callbacks: callbacks
         });
 
         // Fine-tuning phase of transfer learning.
@@ -163,26 +229,29 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         // to do with the unfreezing of the fine-tuning layers above,
         // which leads to higher memory consumption during backpropagation.
         console.log('Phase 2 of 2: fine-tuning phase');
+        let fineCallbacks = {
+            onEpochEnd: (epoch, logs) => {
+                this.log(
+                    `Accuracy: ${(logs.acc * 100).toFixed(1)}% Epoch: ${epoch + 1}`);
+                this.updateStatus({
+                    phase: 'fine',
+                    acc: logs.acc,
+                    epoch: epoch
+                })
+
+            },
+            onTrainEnd: async (logs) => {
+                this.updateStatus({
+                    phase: 'fine',
+                    state: 'done'
+                })
+            }
+        }
         await model.fit(images, targets, {
             epochs: this.jobMeta.fineTuningEpochs,
             batchSize: this.jobMeta.batchSize / 2,
             validationSplit: this.jobMeta.validationSplit,
-            callbacks: {
-                onEpochEnd: (epoch, logs) => {
-                    this.log(
-                        `Accuracy: ${(logs.acc * 100).toFixed(1)}% Epoch: ${epoch + 1}`);
-
-                },
-                onTrainEnd: async (logs) => {
-
-                    //const saveResult = await model.save('localstorage://my-model-1');
-                    //await model.save('downloads://my-model'); Downloads the file
-                    //https://www.tensorflow.org/js/guide/save_load
-                    //await model.save('http://model-server.domain/upload')
-                    //NodeJS: await model.save('file:///path/to/my-model');
-                    this.log("Train End: " + JSON.stringify(logs, null, 3));
-                }
-            }
+            callbacks: fineCallbacks
         });
         console.log("DOne!");
         // Save model.
@@ -198,6 +267,10 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         console.log(
             `\nNext, run the following command to test the model in the browser:`);
         console.log(`\n  yarn watch`);
+        await this.updateStatus({
+            phase: 'all',
+            state: 'done'
+        })
     }
 
 
@@ -289,7 +362,24 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         newHead.add(tf.layers.dense({units: 5}));
         return newHead;
     }
+    mapInputShapes(model, newShapeMap) {
+        const cfg = {...model.getConfig()};
+        cfg.layers = (cfg.layers).map(l => {
+            if(l.name in newShapeMap) {
+                return {...l, config: {
+                    ...l.config,
+                    batchInputShape: newShapeMap[l.name]
+                }};
+            } else {
+                return l;
+            }
+        });
 
+        const map = tf.serialization.SerializationMap.getMap().classNameMap;
+        const [cls, fromConfig] = map[model.getClassName()];
+
+        return fromConfig(cls, cfg);
+    }
     /**
      * Builds object-detection model from MobileNet.
      *
@@ -303,8 +393,16 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         // Build the new head model.
         const newHead = this.buildNewHead(truncatedBase.outputs[0].shape.slice(1));
         const newOutput = newHead.apply(truncatedBase.outputs[0]);
-        const model = tf.model({inputs: truncatedBase.inputs, outputs: newOutput});
-
+        let model = tf.model({inputs: truncatedBase.inputs, outputs: newOutput});
+        /*model = this.mapInputShapes(model, {
+            'input_1':[
+                60,
+                240,
+                320,
+                3
+            ],
+            'dense_Dense1':25088
+        })*/
         return {model, fineTuningLayers};
     }
 }

@@ -40,5 +40,15 @@ class RunnableJobBase{
             return response.data;
         });
     }
+    async updateStatus(status) {
+
+        return axios(
+            {
+                method: 'post',
+                url: '/jobs/' + this.job._id + '/status',
+            },
+            status
+        );
+    }
 }
 module.exports = RunnableJobBase;
