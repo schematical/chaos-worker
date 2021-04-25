@@ -133,7 +133,10 @@ class RunnableJobBase{
                     Authorization: this.getAuthorization()
                 }
             }
-        );
+        )
+        .catch((err) => {
+            console.error(err);
+        })
     }
 }
 module.exports = RunnableJobBase;
