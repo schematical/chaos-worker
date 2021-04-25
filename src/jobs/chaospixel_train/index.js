@@ -274,10 +274,10 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             validationSplit: this.jobMeta.validationSplit,
             callbacks: fineCallbacks
         });
-        console.log("DOne!");
+        this.log("DOne!");
         // Save model.
         // First make sure that the base directory dists.
-        console.log(`Model training took ${(tf.util.now() - tBegin) / 1e3} s`);
+        this.log(`Model training took ${(tf.util.now() - tBegin) / 1e3} s`);
         await this.saveModel(model, this.jobMeta.model_save_uri);
 
        /*

@@ -80,22 +80,20 @@ class RunnableJobBase{
         return model.save(modelSaveURL)
             .then(() => {
 
-                console.log(`Trained model is saved to ${modelSaveURL}`);
-                console.log(
+                this.log(`Trained model is saved to ${modelSaveURL}`);
+                this.log(
                     `\nNext, run the following command to test the model in the browser:`);
-                console.log(`\n  yarn watch`);
+                this.log(`\n  yarn watch`);
                 var zip = new AdmZip();
 
                 // add file directly
                 var content = "inner content of the file";
                 zip.addFile('model.json', fs.readFileSync(modelSavePath + '/model.json'), "");
                 zip.addFile('weights.bin', fs.readFileSync(modelSavePath + '/weights.bin'), "");
-                // add local file
-               // zip.addLocalFile("/home/me/some_picture.png");
+
                 // get everything as a buffer
                 zipBuffer = zip.toBuffer();
-                // or write everything to disk
-                // zip.writeZip(/*target file name*/"/home/me/files.zip");
+
 
                 const auth = this.getAuthorization();
                 return axios({
@@ -114,19 +112,10 @@ class RunnableJobBase{
                     'maxContentLength': Infinity,
                     'maxBodyLength': Infinity
                 })
-                /*return model.save(
-                    tf.io.browserHTTPRequest(
-                        response.data.url,
-                        {
-                            method: 'POST',
-                            headers: {
-                                // 'Authorization': 'header_value_1'
-                            }
-                        })
-                );*/
+
             })
             .then((response) => {
-                console.log("I think the upload worked? ", response)
+                this.log("I think the upload worked? ", response)
             })
             .catch((err) => {
                 console.error(err);
