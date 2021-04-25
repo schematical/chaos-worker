@@ -28,8 +28,8 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         let defaults = {
             validationSplit: 0.15,
             batchSize: 128,
-            fineTuningEpochs: 100,
-            initialTransferEpochs: 250,
+            fineTuningEpochs: 2,
+            initialTransferEpochs: 2,
             canvasSize: 224,
             topLayerGroupNames: [/*'conv_pw_9', 'conv_pw_10',*/ 'conv_pw_11'],
             gpu: false
@@ -104,10 +104,29 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             imageEle.src = imgSrc;
         });
     }
+    loadTrainingData(){
+        let trainingData = [];
+        let promises = [];
+
+        this.jobMeta.data_uris.forEach(async (data_uri) => {
+            promises.push(
+                this.downloadFile(data_uri)
+            );
+        });
+        return Promise.all(promises)
+            .then((results) => {
+                results.forEach((trainingDataSegment) => {
+                    trainingData = trainingData.concat(trainingDataSegment);
+                });
+                return trainingData;
+            })
+    }
     async run(){
-        const trainingData = await this.downloadFile(this.jobMeta.data_uri);// JSON.parse(fs.readFileSync('C:\\Users\\mlea\\WebstormProjects\\chaos-worker\\224.json').toString())//
+        let trainingData = await this.loadTrainingData();
         let tagsDict = {};
         let imageEleDict = {};
+
+
         let p = Promise.resolve();
 
         trainingData.forEach((image)=>{
@@ -131,6 +150,8 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             })
         })
         await p;
+
+
         //tf.dispose([imageTensors, targetTensors]);
 
 
@@ -145,7 +166,7 @@ class ChaosPixelTrainJob extends RunnableJobBase{
             tfn = require('@tensorflow/tfjs-node');
         }
 
-        const modelSaveURL = 'file://./tmp/' + this.job._id + '-v2.2';
+
 
         const tBegin = tf.util.now();
 
@@ -256,17 +277,11 @@ class ChaosPixelTrainJob extends RunnableJobBase{
         console.log("DOne!");
         // Save model.
         // First make sure that the base directory dists.
-        const modelSavePath = modelSaveURL.replace('file://', '');
-        const dirName = path.dirname(modelSavePath);
-        if (!fs.existsSync(dirName)) {
-            fs.mkdirSync(dirName);
-        }
-        await model.save(modelSaveURL);
         console.log(`Model training took ${(tf.util.now() - tBegin) / 1e3} s`);
-        console.log(`Trained model is saved to ${modelSaveURL}`);
-        console.log(
-            `\nNext, run the following command to test the model in the browser:`);
-        console.log(`\n  yarn watch`);
+        await this.saveModel(model, this.jobMeta.model_save_uri);
+
+       /*
+        await this.saveFile(this.jobMeta.saveUri)*/
         await this.updateStatus({
             phase: 'all',
             state: 'done'
